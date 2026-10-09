@@ -5,12 +5,13 @@ Writes every number used in the README to outputs/*.csv and every figure to outp
 import os
 import time
 
+import numpy as np
 import pandas as pd
 
 from src import plots as P
 from src.analysis import (binned, coverage_split, leaderboard, ols, play_table, receiving_profile,
                           split_half, team_board)
-from src.clean import build
+from src.clean import build, load_tracking, standardise
 from src.metric import TAU, gravity
 from src.model import features, oof_gbm, score
 
@@ -19,6 +20,8 @@ OUT = "outputs"
 KEY = ["gameId", "playId"]
 BASELINE = "v2"  # chosen over v1: higher out-of-fold R2 and (slightly) more stable player GOE
 MIN_ROUTES = 50  # minimum non-targeted routes for the leaderboard (20 let small-sample players into the top 10)
+PULL = "Pull (snap -> 1 s before throw)"  # lead metric; GOE level 1 s before the throw is the second column
+C_HERO = "#CC79A7"
 
 
 def step(msg):
@@ -57,6 +60,10 @@ def core():
     plays_df, f, info = build()
     pre_ok = plays_df.loc[plays_df.pre_ok, KEY]  # drops 6 throws made < 1 s after the snap
     print(f"{len(plays_df)} plays | target matched on {info['target_match_rate']:.1%} of {info['n_thrown']} thrown passes")
+    pd.DataFrame([{"thrown_passes": info["n_thrown"], "target_match_rate": info["target_match_rate"],
+                   "plays_analysed": len(plays_df), "plays_with_pre_throw_frame": len(pre_ok),
+                   "games": plays_df.gameId.nunique(), "weeks": plays_df.week.nunique()}]
+                 ).to_csv(f"{OUT}/data_summary.csv", index=False)
 
     step("Step 2-3: gravity, expected gravity, GOE")
     d, _ = goe_at(f, plays_df, "throw")
@@ -73,7 +80,7 @@ def core():
     p_pre = p[p.pre_ok]
     rows = []
     for x, label, df in [("decoy_goe", "GOE at throw", p), ("decoy_goe_pre", "GOE 1 s before throw", p_pre),
-                         ("decoy_pull", "Pull (snap -> 1 s before throw)", p_pre)]:
+                         ("decoy_pull", PULL, p_pre)]:
         for y in ["sep_throw", "sep_post_throw", "complete", "yards"]:
             rows.append({"decoy metric": label, **ols(df, y, x)})
     effects = pd.DataFrame(rows)
@@ -81,29 +88,32 @@ def core():
     print("outcome ~ decoy metric + target depth (game-clustered SEs); coef per +1 defender of decoy attention")
     show(effects, digits=4)
 
-    b_throw, b_pre = binned(p, "decoy_goe", "sep_throw"), binned(p_pre, "decoy_goe_pre", "sep_throw")
+    b_pull, b_pre = binned(p_pre, "decoy_pull", "sep_throw"), binned(p_pre, "decoy_goe_pre", "sep_throw")
+    bins = pd.concat([b_pull.assign(metric="Pull"), b_pre.assign(metric="GOE 1 s before throw")])
+    bins.to_csv(f"{OUT}/binned_separation.csv", index=False)
+    print("\ntarget separation at the throw by quintile of total decoy PULL (hockey-stick check):")
+    show(b_pull, digits=2)
     e = effects.set_index(["decoy metric", "outcome"])
-    eff_thr, eff_pre = e.loc[("GOE at throw", "sep_throw")], e.loc[("GOE 1 s before throw", "sep_throw")]
-    P.binned_effect(
-        {"Decoy GOE 1.0 s before the throw": (b_pre, P.C_DECOY, "-"), "Decoy GOE at the throw": (b_throw, P.C_OTHER, "--")},
-        f"{OUT}/decoy_goe_vs_separation.png",
-        title="Decoys that hold defenders open space for the target",
-        subtitle=(f"+{eff_pre.coef:.2f} yd target separation per extra defender pulled 1 s before the throw "
-                  f"(+{eff_thr.coef:.2f} yd measured at the throw)"),
-        xlabel="Total decoy GOE on the play (defenders' worth of attention above expected)",
-        ylabel="Target separation at the throw (yd)")
+    eff_pull, eff_pre = e.loc[(PULL, "sep_throw")], e.loc[("GOE 1 s before throw", "sep_throw")]
+    series = {"Pull: attention gained after the snap": (b_pull, P.C_DECOY, "-"),
+              "Attention level 1 s before the throw": (b_pre, P.C_OTHER, "--")}
+    subtitle = (f"+{eff_pull.coef:.2f} yd target separation per extra defender pulled toward the decoys after the snap "
+                f"(attention level: +{eff_pre.coef:.2f} yd)")
+    P.binned_effect(series, f"{OUT}/decoy_pull_vs_separation.png",
+                    title="Decoys that drag defenders open space for the target", subtitle=subtitle)
     return dict(plays_df=plays_df, f=f, pre_ok=pre_ok, d=d, d_pre=d_pre, d_pull=d_pull, p=p, p_pre=p_pre,
-                effects=effects, b_pre=b_pre, b_throw=b_throw)
+                effects=effects, series=series, eff_pull=eff_pull, eff_pre=eff_pre)
 
 
 def step5(c):
     step("Step 5: player leaderboard (non-targeted routes)")
     plays_df = c["plays_df"]
-    lb = leaderboard(c["d_pre"], plays_df, extra={"goe_throw": c["d"], "pull": c["d_pull"]}, min_n=MIN_ROUTES)
+    lb = leaderboard(c["d_pull"], plays_df, extra={"goe_pre": c["d_pre"], "goe_throw": c["d"]},
+                     min_n=MIN_ROUTES, name="pull")
     lb = lb.join(receiving_profile(c["p"], c["d"]), on="nflId")
-    lb["pull_rank"] = lb.pull.rank(ascending=False).astype(int)
+    lb["goe_rank"] = lb.goe_pre.rank(ascending=False).astype(int)
     lb.to_csv(f"{OUT}/leaderboard.csv", index=False)
-    cols = ["rank", "player", "team", "pos", "decoy_routes", "goe_pre", "ci95", "goe_throw", "pull_rank"]
+    cols = ["rank", "player", "team", "pos", "decoy_routes", "pull", "ci95", "goe_pre", "goe_rank"]
     print(f"{len(lb)} players with >= {MIN_ROUTES} non-targeted routes")
     show(lb[cols], 10)
     print("bottom 5:")
@@ -131,25 +141,19 @@ def block_a(c):
     st = stab[stab.level == "player"].set_index(["metric", "split"]).r
     e = effects[effects.outcome == "sep_throw"].set_index("decoy metric")
     stars = lb[lb.pos_group == "WR"].nlargest(10, "targets")
-    comp = pd.DataFrame([
-        {"metric": "GOE 1 s before throw", "effect_yd": e.loc["GOE 1 s before throw", "coef"],
-         "ci_lo": e.loc["GOE 1 s before throw", "ci_lo"], "ci_hi": e.loc["GOE 1 s before throw", "ci_hi"],
-         "r_weeks": st[("GOE 1 s before throw", "weeks 1-4 vs 5-8")], "r_odd_even": st[("GOE 1 s before throw", "odd vs even weeks")],
-         "r_with_own_sep": v.goe_pre.corr(v.target_sep_adj), "star_wr_median_rank": stars["rank"].median()},
-        {"metric": "Pull (snap -> 1 s before throw)", "effect_yd": e.loc["Pull (snap -> 1 s before throw)", "coef"],
-         "ci_lo": e.loc["Pull (snap -> 1 s before throw)", "ci_lo"], "ci_hi": e.loc["Pull (snap -> 1 s before throw)", "ci_hi"],
-         "r_weeks": st[("Pull", "weeks 1-4 vs 5-8")], "r_odd_even": st[("Pull", "odd vs even weeks")],
-         "r_with_own_sep": v.pull.corr(v.target_sep_adj), "star_wr_median_rank": stars.pull_rank.median()},
-    ])
+    def row(metric, stab_name, col, rank_col):
+        return {"metric": metric, "effect_yd": e.loc[metric, "coef"], "ci_lo": e.loc[metric, "ci_lo"],
+                "ci_hi": e.loc[metric, "ci_hi"], "r_weeks": st[(stab_name, "weeks 1-4 vs 5-8")],
+                "r_odd_even": st[(stab_name, "odd vs even weeks")], "r_with_own_sep": v[col].corr(v.target_sep_adj),
+                "star_wr_median_rank": stars[rank_col].median()}
+
+    comp = pd.DataFrame([row(PULL, "Pull", "pull", "rank"),
+                         row("GOE 1 s before throw", "GOE 1 s before throw", "goe_pre", "goe_rank")])
     comp.to_csv(f"{OUT}/metric_comparison.csv", index=False)
     print(f"players with >= {MIN_ROUTES} decoy routes and >= 10 targets: {len(v)}")
     show(comp)
-    print("\n10 most-targeted WRs: rank by GOE vs rank by pull (of", len(lb), ")")
-    show(stars[["player", "team", "targets", "target_sep_adj", "rank", "pull_rank"]])
-    lb_pull = leaderboard(c["d_pull"], plays_df, extra={"goe_pre": c["d_pre"]}, min_n=MIN_ROUTES, name="pull")
-    lb_pull.to_csv(f"{OUT}/leaderboard_pull.csv", index=False)
-    print("\nTop 10 by pull:")
-    show(lb_pull[["rank", "player", "team", "pos", "decoy_routes", "pull", "ci95", "goe_pre"]], 10)
+    print("\n10 most-targeted WRs: rank by pull vs rank by GOE level (of", len(lb), ")")
+    show(stars[["player", "team", "targets", "target_sep_adj", "rank", "goe_rank"]])
 
     step("A2: man vs zone (decoy GOE 1 s before throw -> target separation at throw)")
     cov = pd.concat([coverage_split(c["p_pre"], "decoy_goe_pre").assign(metric="GOE 1 s before throw"),
@@ -167,12 +171,12 @@ def block_a(c):
     print("team vs player split-half r (GOE 1 s before throw):")
     show(stab[stab.metric == "GOE 1 s before throw"])
 
-    step("A4: hidden heroes (top 15 decoy GOE, bottom half for targets per route)")
+    step("A4: hidden heroes (top 15 by pull, bottom half for targets per route)")
     med = lb.tprr.median()
     heroes = lb.head(15)[lambda t: t.tprr < med]
     heroes.to_csv(f"{OUT}/hidden_heroes.csv", index=False)
     print(f"median targets per route among the {len(lb)} players: {med:.3f}")
-    show(heroes[["rank", "player", "team", "pos", "decoy_routes", "goe_pre", "tprr", "targets"]])
+    show(heroes[["rank", "player", "team", "pos", "decoy_routes", "pull", "goe_pre", "tprr", "targets"]])
 
     step("A5: tau sensitivity (top 10 overlap with tau = 2)")
     rows = []
@@ -189,7 +193,131 @@ def block_a(c):
     tau_df = pd.DataFrame(rows)
     tau_df.to_csv(f"{OUT}/tau_sensitivity.csv", index=False)
     show(tau_df)
-    c.update(comp=comp, lb_pull=lb_pull, cov=cov, tb=tb, heroes=heroes, tau_df=tau_df)
+    c.update(comp=comp, cov=cov, tb=tb, heroes=heroes, tau_df=tau_df)
+
+
+def _nearest_defender(fr):
+    """Target position and his nearest defender (any defender) in one frame."""
+    t = fr[fr.is_target & fr.is_receiver].iloc[0]
+    dd = fr[fr.side == "def"]
+    dist = np.hypot(dd.x - t.x, dd.y - t.y)
+    j = dist.idxmin()
+    return {"x_t": t.x, "y_t": t.y, "x_d": dd.x[j], "y_d": dd.y[j], "dist": float(dist[j])}
+
+
+def example_play(c):
+    """A strong decoy play: a top decoy pulling well above expected on a completed downfield pass.
+
+    Prefer the top-5 decoys (the named examples); fall back to the top 10.
+    """
+    lb = c["lb"]
+    cols = KEY + ["complete", "sep_throw", "target_depth", "target_id", "decoy_pull"]
+    cand = c["d_pull"][~c["d_pull"].is_target & c["d_pull"].nflId.isin(lb.head(10).nflId)].merge(c["p_pre"][cols], on=KEY)
+    cand = cand[(cand.complete == 1) & cand.sep_throw.between(3, 10) & (cand.target_depth >= 5) & (cand.GOE >= 1.0)
+                & (cand.decoy_pull > 0)]  # the decoys as a group also pulled coverage on this play
+    cand = cand.assign(top5=cand.nflId.isin(lb.head(5).nflId)).sort_values(["top5", "GOE"], ascending=False)
+    print("example play candidates (decoy pull GOE, target separation):")
+    show(cand[KEY + ["displayName", "top5", "G", "GOE", "decoy_pull", "sep_throw", "target_depth"]], 6)
+    return cand.iloc[0]
+
+
+def visuals(c):
+    step("Block B: visuals")
+    f, plays_df, lb = c["f"], c["plays_df"], c["lb"]
+
+    # 1. leaderboard
+    a, b = lb.iloc[0], lb.iloc[1]
+    who = f"{a.player} and {b.player} ({a.team})" if a.team == b.team else f"{a.player} and {b.player}"
+    P.leaderboard_chart(
+        lb, f"{OUT}/leaderboard.png", title=f"{who} drag the most defenders without the ball",
+        subtitle=("Pull: defenders' worth of attention a receiver gains from the snap to 1 s before the throw, vs expected,\n"
+                  "per non-targeted route (min 50 routes, 2021 weeks 1-8). Whiskers: 95% CI. Right column: attention level."),
+        xlabel="Pull per decoy route (defenders' worth of attention vs expected)")
+
+    # 2-3. example play: static panels + GIF
+    row = example_play(c)
+    gid, pid, decoy = row.gameId, row.playId, row.nflId
+    fp = f[(f.gameId == gid) & (f.playId == pid)]
+    pl = plays_df[(plays_df.gameId == gid) & (plays_df.playId == pid)].iloc[0]
+    los = fp[(fp.moment == "snap") & (fp.side == "ball")].x.iloc[0]
+    tname = fp[fp.is_target & fp.is_receiver].displayName.iloc[0]
+    dname = row.displayName
+    panels, gvals = [], {}
+    for mom, name in [("snap", "At the snap"), ("pre_throw", "1 s before the throw"), ("throw", "At the throw")]:
+        grav, att = gravity(fp, moment=mom)
+        gvals[mom] = grav.loc[grav.nflId == decoy, "G"].iloc[0]
+        fr = fp[fp.moment == mom]
+        panels.append(dict(fr=fr, att=att, grav=grav, los=los, highlight=decoy, name=name,
+                           sep=_nearest_defender(fr) if mom == "throw" else None))
+    sep = panels[-1]["sep"]["dist"]
+
+    t = load_tracking()
+    tp = standardise(t[(t.gameId == gid) & (t.playId == pid)])
+    flags = fp[fp.moment == "snap"][["nflId", "displayName", "officialPosition", "pos_group", "side",
+                                     "is_target", "is_receiver", "is_defender"]]
+    tp = tp.merge(flags, on="nflId", how="left")
+    tp["side"] = tp.side.fillna("ball")
+    for col in ["is_target", "is_receiver", "is_defender"]:
+        tp[col] = tp[col].fillna(False).astype(bool)
+    tp = tp[(tp.frameId >= pl.snap) & (tp.frameId <= pl.post_throw)]
+    xlim = (max(0, tp.x.min() - 3), min(120, tp.x.max() + 3))
+
+    desc = pl.playDescription.split(") ", 1)[-1] if pl.playDescription.startswith("(") else pl.playDescription
+    title = f"{dname} drags the defense: {tname} gets {sep:.1f} yd of space"
+    subtitle = (f"{pl.possessionTeam} vs {pl.defensiveTeam}, 2021 week {pl.week}: {desc[:110]}\n"
+                f"{dname}'s attention G: {gvals['snap']:.2f} at the snap -> {gvals['pre_throw']:.2f} one second before "
+                f"the throw (pull {row.GOE:+.2f} defenders vs expected)")
+    P.play_panels(f"{OUT}/play_example.png", panels, xlim, title, subtitle)
+
+    seq = []
+    for k, fr in tp.groupby("frameId"):
+        fr = fr.assign(moment="m")
+        grav, att = gravity(fr, moment="m")
+        g = grav.loc[grav.nflId == decoy, "G"].iloc[0]
+        phase = "THROW" if k == pl.throw else ("ball in the air" if k > pl.throw else "")
+        seq.append(dict(fr=fr, att=att, grav=grav, sep=_nearest_defender(fr) if k >= pl.throw else None,
+                        label=f"{(k - pl.snap) / 10:.1f} s after the snap   {dname} G = {g:.2f}   {phase}"))
+    seq += [seq[-1]] * 8  # hold the last frame
+    P.play_gif(f"{OUT}/play_example.gif", seq, xlim, los, decoy, title=f"{dname} drags the defense")
+
+    # 4. one-page summary
+    cov = c["cov"].set_index(["metric", "coverage"])
+    man, zone = cov.loc[("Pull", "Man"), "coef"], cov.loc[("Pull", "Zone"), "coef"]
+    p_int = cov.loc[("Pull", "Man minus Zone (interaction)"), "p"]
+    st = c["stab"].set_index(["level", "metric", "split"]).r
+    team_r, player_r = st[("team", "GOE 1 s before throw", "weeks 1-4 vs 5-8")], st[("player", "GOE 1 s before throw", "weeks 1-4 vs 5-8")]
+    tb = c["tb"]
+    hero = c["heroes"].iloc[0]
+    callouts = [
+        ("Decoys matter more against zone",
+         f"+{zone:.2f} yd of target separation per defender pulled vs zone, +{man:.2f} yd vs man. "
+         f"Suggestive (p = {p_int:.2f}, one of several tests), not proven.", P.C_DECOY),
+        ("Scheme matters",
+         f"Team-level attention is as stable as player-level (r = {team_r:.2f} vs {player_r:.2f}), led by "
+         + ", ".join(f"{r.possessionTeam} ({r.goe_pre:+.3f})" for r in tb.head(3).itertuples())
+         + " defenders per decoy route.", "#009E73"),
+        (f"Hidden hero: {hero.player} ({hero.team} {hero.pos})",
+         f"A top-{int(hero['rank'])} decoy (pull {hero.pull:+.2f} per route) but targeted on only {hero.tprr:.0%} of his routes "
+         f"(median {lb.tprr.median():.0%}).", C_HERO),
+    ]
+    b_pull = c["series"]["Pull: attention gained after the snap"][0]
+    below, above = b_pull[b_pull.x_mean < 0]["mean"], b_pull[b_pull.x_mean > 0.5]["mean"]
+    c["hockey"] = bool(below.max() - below.min() < 0.25 and above.min() > below.max() + 0.3)
+    print(f"hockey stick for pull: {c['hockey']} (bins below 0: {below.round(2).tolist()}, above +0.5: {above.round(2).tolist()})")
+    chart_sub = f"+{c['eff_pull'].coef:.2f} yd per extra defender pulled (attention level: +{c['eff_pre'].coef:.2f} yd)"
+    if c["hockey"]:
+        chart_sub += "\nDecoys only help when they genuinely pull coverage; average decoy routes add little."
+    P.summary_page(
+        f"{OUT}/summary.png",
+        title="Gravity: who drags defenders without touching the ball",
+        definition=("Pull = defenders' worth of attention a non-targeted receiver gains from the snap to 1 s before "
+                    "the throw, compared with what is normal for his alignment and the situation."),
+        series=c["series"], chart_title="Decoys that drag defenders open space for the target",
+        chart_subtitle=chart_sub, lb=lb, callouts=callouts,
+        footnote=(f"NFL Big Data Bowl 2023 tracking, 2021 weeks 1-8, {len(plays_df):,} targeted passes. Attention = softmax "
+                  f"of defender-receiver distance (tau = 2 yd). Limits: proximity is not assignment; 8 weeks; player "
+                  f"stability r = {st[('player', 'Pull', 'weeks 1-4 vs 5-8')]:.2f}; no detectable lift in completions or yards."))
+    print("saved leaderboard.png, play_example.png, play_example.gif, summary.png")
 
 
 def main():
@@ -198,6 +326,7 @@ def main():
     c = core()
     step5(c)
     block_a(c)
+    visuals(c)
     print(f"\ntotal {time.time() - t0:.0f}s")
     return c
 
