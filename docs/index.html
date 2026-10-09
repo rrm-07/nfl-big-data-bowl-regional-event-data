@@ -4,7 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gravity: decoys that drag defenders</title>
-  <meta name="description" content="Which receivers pull defenders away from the target without touching the ball, and how much space that buys. Built on NFL Big Data Bowl 2023 tracking data.">
+  <meta name="description" content="Every extra defender pulled buys +0.35 yd of separation, about twice as much against zone as man. Which NFL receivers drag defenders without touching the ball.">
+  <!-- Link previews (Open Graph). Scrapers need absolute URLs, so these point at the GitHub Pages address. -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Gravity: decoys that drag defenders">
+  <meta property="og:description" content="Every extra defender pulled buys +0.35 yd of separation, about twice as much against zone as man.">
+  <meta property="og:url" content="https://rrm-07.github.io/nfl-big-data-bowl-regional-event-data/">
+  <meta property="og:image" content="https://rrm-07.github.io/nfl-big-data-bowl-regional-event-data/assets/summary.png">
+  <meta property="og:image:alt" content="One-page summary of Gravity: who drags defenders without touching the ball">
+  <meta name="twitter:card" content="summary_large_image">
   <style>
     :root {
       --ink: #1b1b1b;
@@ -50,7 +58,20 @@
     ol.top5 li { margin: 0.25rem 0; }
     ul.takeaways { padding-left: 1.4rem; margin: 0; }
     ul.takeaways li { font-size: 1.2rem; margin: 0 0 0.9rem; padding-left: 0.2rem; }
-    a { color: var(--blue); text-underline-offset: 0.15em; }
+    body { overflow-wrap: break-word; }
+    a { color: var(--blue); text-underline-offset: 0.15em; overflow-wrap: anywhere; }  /* long repo URL wraps on phones */
+    .howto { display: block; margin-top: 0.35rem; font-size: 1rem; color: var(--muted); }
+    .howto b { color: var(--ink); }
+    h3 { font-size: 1.3rem; margin: 2.25rem 0 0.75rem; }
+    .table-wrap { overflow-x: auto; }  /* safety net: a wide table never scrolls the whole page */
+    table { width: 100%; border-collapse: collapse; font-size: 1.05rem; }
+    th, td { padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { font-size: 0.95rem; color: var(--muted); font-weight: 600; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    td.num { white-space: nowrap; }  /* numbers stay on one line; headers may wrap */
+    @media (max-width: 480px) { table { font-size: 1rem; } th, td { padding: 0.5rem 0.3rem; } }
+    /* Reduced motion: the GIF is already swapped for the static panels, so don't show them twice */
+    @media (prefers-reduced-motion: reduce) { .panels { display: none; } }
     a:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     footer { padding-top: 2rem; padding-bottom: 3.5rem; border-top: 1px solid var(--line); color: var(--muted); }
     footer p { font-size: 1rem; }
@@ -72,7 +93,16 @@
           <img src="assets/play_example.gif" width="680" height="656"
                alt="Animated play diagram, KC vs BAL. As the play develops, the lines from Baltimore's coverage defenders bend toward Tyreek Hill, while Mecole Hardman, the receiver who gets the ball, is left open.">
         </picture>
-        <figcaption>Tyreek Hill's attention rises from 1.33 to 2.68 before the throw, and Mecole Hardman ends up 7.0 yd open (KC vs BAL, week 2). Attention is counted in defenders' worth of focus; thicker lines mean a defender is watching that receiver more closely.</figcaption>
+        <figcaption>Tyreek Hill's attention rises from 1.33 to 2.68 before the throw, and Mecole Hardman ends up 7.0 yd open (KC vs BAL, week 2). Attention is counted in defenders' worth of focus.
+          <span class="howto"><b>How to read it:</b> orange-red X's are defenders, blue dots are receivers, the gold dot gets the ball and the circled player is the decoy; a thicker line means that defender is watching that receiver more closely.</span>
+        </figcaption>
+      </figure>
+      <figure class="panels">
+        <img src="assets/play_example.png" width="2489" height="1298" loading="lazy"
+             alt="Three side-by-side diagrams of the same play at the snap, 1 second before the throw and at the throw. Coverage defenders' attention lines shift toward Tyreek Hill while Mecole Hardman gets open.">
+        <figcaption>The same play in three moments: the snap, 1 second before the throw, and the throw.
+          <span class="howto"><b>How to read it:</b> from left to right, watch the orange-red lines gather on Hill (circled) while Hardman (gold) gets open; the boxed label shows his separation at the throw.</span>
+        </figcaption>
       </figure>
     </section>
 
@@ -92,7 +122,9 @@
       <figure>
         <img src="assets/decoy_pull_vs_separation.png" width="1698" height="949" loading="lazy"
              alt="Chart of target separation at the throw against how much the decoys pulled on the play. Separation stays flat for most plays and rises only on plays where the decoys pulled the most coverage.">
-        <figcaption>Decoys only help when they genuinely pull coverage; average decoy routes add little.</figcaption>
+        <figcaption>Decoys only help when they genuinely pull coverage; average decoy routes add little.
+          <span class="howto"><b>How to read it:</b> each dot is a fifth of all passes; further right = decoys pulled more defenders; higher = target more open. Blue is pull, our measure; grey is the simpler attention level.</span>
+        </figcaption>
       </figure>
       <div class="finding" style="margin-top: 2rem;">
         <p><strong>About twice the effect against zone as against man:</strong> +0.35 yd per extra defender pulled against zone, +0.17 yd against man. Suggestive, not proven (p = 0.03, one of several tests).</p>
@@ -105,7 +137,9 @@
       <figure>
         <img src="assets/leaderboard.png" width="1991" height="1192" loading="lazy"
              alt="Bar chart of the top 10 decoys by pull per route when not targeted: Pat Freiermuth (PIT TE) +0.27, Eric Ebron (PIT TE) +0.23, Kendall Hinton (DEN WR) +0.22, Dallas Goedert (PHI TE) +0.17, Tyreek Hill (KC WR) +0.15, Mark Andrews (BAL TE) +0.15, Alvin Kamara (NO RB) +0.14, Chris Godwin (TB WR) +0.14, Tim Patrick (DEN WR) +0.14, KhaDarel Hodge (DET WR) +0.14.">
-        <figcaption>Extra defenders' worth of focus drawn per route when he is not the target, compared with normal (minimum 50 such routes, 2021 weeks 1–8). Whiskers show the uncertainty.</figcaption>
+        <figcaption>Extra defenders' worth of focus drawn per route when he is not the target, compared with normal (minimum 50 such routes, 2021 weeks 1–8).
+          <span class="howto"><b>How to read it:</b> a longer bar means he pulled more extra defenders on routes where he wasn't the target; the thin line shows the uncertainty; the right-hand column is the simpler attention-level score.</span>
+        </figcaption>
       </figure>
       <ol class="top5" aria-label="Top 5 decoys">
         <li>Pat Freiermuth (PIT TE)</li>
@@ -117,6 +151,23 @@
       <div class="callout">
         <p><strong>Hidden hero: Eric Ebron (PIT TE).</strong> A top-2 decoy, but targeted on only 11% of his routes.</p>
       </div>
+
+      <h3 id="teams-heading">Top 5 teams by decoy attention</h3>
+      <div class="table-wrap">
+        <table aria-labelledby="teams-heading">
+          <thead>
+            <tr><th scope="col">Rank</th><th scope="col">Offense</th><th scope="col" class="num">Extra attention per decoy route</th><th scope="col" class="num">Decoy routes</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td>PIT Steelers</td><td class="num">+0.095</td><td class="num">820</td></tr>
+            <tr><td>2</td><td>BUF Bills</td><td class="num">+0.064</td><td class="num">802</td></tr>
+            <tr><td>3</td><td>DET Lions</td><td class="num">+0.058</td><td class="num">1,069</td></tr>
+            <tr><td>4</td><td>DEN Broncos</td><td class="num">+0.056</td><td class="num">921</td></tr>
+            <tr><td>5</td><td>MIA Dolphins</td><td class="num">+0.055</td><td class="num">939</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="howto"><b>How to read it:</b> how many extra defenders' worth of attention a team's decoys hold on an average route, compared with normal, 1 second before the throw. Higher = the offense's scheme pulls more coverage away from the target.</p>
     </section>
 
     <section aria-labelledby="takeaways-heading">
@@ -140,7 +191,9 @@
           <img src="assets/summary.png" width="2808" height="1378" loading="lazy"
                alt="One-page summary: the definition of pull, the separation chart, the top 5 decoys, and callouts on zone versus man, scheme, and hidden hero Eric Ebron.">
         </a>
-        <figcaption>Tap to open full size.</figcaption>
+        <figcaption>Tap to open full size.
+          <span class="howto"><b>How to read it:</b> the left chart is the separation result; the right side shows the top 5 decoys and the three key findings.</span>
+        </figcaption>
       </figure>
     </section>
   </main>
