@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gravity: decoys that drag defenders</title>
+  <meta name="description" content="Which receivers pull defenders away from the target without touching the ball, and how much space that buys. Built on NFL Big Data Bowl 2023 tracking data.">
+  <style>
+    :root {
+      --ink: #1b1b1b;
+      --muted: #4a4a4a;
+      --blue: #0072B2;   /* decoys, links: same palette as the charts */
+      --amber: #E69F00;  /* targeted receiver (accents only, never text) */
+      --line: #e3e6ea;
+      --soft: #f5f7f9;
+    }
+    * { box-sizing: border-box; }
+    html { font-size: 112.5%; }  /* 18px base for easy reading */
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--ink);
+      background: #fff;
+      line-height: 1.6;
+    }
+    header, main, footer { max-width: 48rem; margin: 0 auto; padding: 0 1.25rem; }
+    header { padding-top: 3.5rem; padding-bottom: 1rem; }
+    h1 { font-size: clamp(2.1rem, 7vw, 3.2rem); line-height: 1.1; margin: 0 0 1rem; letter-spacing: -0.01em; }
+    .hook { font-size: clamp(1.2rem, 3.5vw, 1.45rem); color: var(--muted); margin: 0; }
+    section { padding: 2.75rem 0; border-top: 1px solid var(--line); }
+    header + main section:first-child { border-top: 0; padding-top: 1rem; }
+    h2 { font-size: clamp(1.5rem, 4.5vw, 1.9rem); line-height: 1.2; margin: 0 0 1rem; }
+    p { margin: 0 0 1rem; font-size: 1.1rem; }
+    figure { margin: 1.5rem 0 0; }
+    img { display: block; max-width: 100%; height: auto; border-radius: 8px; }
+    figcaption { margin-top: 0.75rem; font-size: 1.05rem; color: var(--muted); }
+    .note { font-size: 1rem; color: var(--muted); }
+    .stat { display: block; font-size: clamp(2.8rem, 12vw, 4.2rem); font-weight: 800; line-height: 1; color: var(--blue); margin-bottom: 0.4rem; }
+    .finding { margin: 0 0 2rem; }
+    .finding strong { font-size: 1.2rem; }
+    .callout {
+      background: var(--soft);
+      border-left: 6px solid var(--amber);
+      border-radius: 6px;
+      padding: 1.1rem 1.3rem;
+      margin: 1.75rem 0 0;
+    }
+    .callout p { margin: 0; }
+    ol.top5 { padding-left: 1.6rem; margin: 1.25rem 0 0; font-size: 1.1rem; }
+    ol.top5 li { margin: 0.25rem 0; }
+    ul.takeaways { padding-left: 1.4rem; margin: 0; }
+    ul.takeaways li { font-size: 1.2rem; margin: 0 0 0.9rem; padding-left: 0.2rem; }
+    a { color: var(--blue); text-underline-offset: 0.15em; }
+    a:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+    footer { padding-top: 2rem; padding-bottom: 3.5rem; border-top: 1px solid var(--line); color: var(--muted); }
+    footer p { font-size: 1rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Gravity: decoys that drag defenders</h1>
+    <p class="hook">The receiver who doesn't get the ball can still win the play. Here is who pulls defenders away from the target, and how much space that buys.</p>
+  </header>
+
+  <main>
+    <section aria-labelledby="play-heading">
+      <h2 id="play-heading">One play</h2>
+      <figure>
+        <picture>
+          <!-- Static three-moment version for visitors who prefer reduced motion -->
+          <source srcset="assets/play_example.png" media="(prefers-reduced-motion: reduce)">
+          <img src="assets/play_example.gif" width="680" height="656"
+               alt="Animated play diagram, KC vs BAL. As the play develops, the lines from Baltimore's coverage defenders bend toward Tyreek Hill, while Mecole Hardman, the receiver who gets the ball, is left open.">
+        </picture>
+        <figcaption>Tyreek Hill's attention rises from 1.33 to 2.68 before the throw, and Mecole Hardman ends up 7.0 yd open (KC vs BAL, week 2). Attention is counted in defenders' worth of focus; thicker lines mean a defender is watching that receiver more closely.</figcaption>
+      </figure>
+    </section>
+
+    <section aria-labelledby="measure-heading">
+      <h2 id="measure-heading">What we measure</h2>
+      <p>Every defender in coverage splits his focus between the receivers around him, most of it on the closest one.</p>
+      <p><strong>Pull</strong> is how many defenders' worth of focus a receiver who is <em>not</em> thrown to draws toward himself after the snap, compared with what's normal for where he lined up and the game situation.</p>
+      <p>We measure it 1 second before the throw, so we don't count defenders who are only there because the ball is coming.</p>
+    </section>
+
+    <section aria-labelledby="found-heading">
+      <h2 id="found-heading">What we found</h2>
+      <div class="finding">
+        <span class="stat">+0.35 yd</span>
+        <p><strong>more separation for the receiver who gets the ball, for every extra defender the decoys pull.</strong></p>
+      </div>
+      <figure>
+        <img src="assets/decoy_pull_vs_separation.png" width="1698" height="949" loading="lazy"
+             alt="Chart of target separation at the throw against how much the decoys pulled on the play. Separation stays flat for most plays and rises only on plays where the decoys pulled the most coverage.">
+        <figcaption>Decoys only help when they genuinely pull coverage; average decoy routes add little.</figcaption>
+      </figure>
+      <div class="finding" style="margin-top: 2rem;">
+        <p><strong>About twice the effect against zone as against man:</strong> +0.35 yd per extra defender pulled against zone, +0.17 yd against man. Suggestive, not proven (p = 0.03, one of several tests).</p>
+        <p><strong>Scheme matters:</strong> team-wide decoy patterns hold up from week to week at least as well as individual players' do, and Pittsburgh leads the league.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="top-heading">
+      <h2 id="top-heading">Top decoys</h2>
+      <figure>
+        <img src="assets/leaderboard.png" width="1991" height="1192" loading="lazy"
+             alt="Bar chart of the top 10 decoys by pull per route when not targeted: Pat Freiermuth (PIT TE) +0.27, Eric Ebron (PIT TE) +0.23, Kendall Hinton (DEN WR) +0.22, Dallas Goedert (PHI TE) +0.17, Tyreek Hill (KC WR) +0.15, Mark Andrews (BAL TE) +0.15, Alvin Kamara (NO RB) +0.14, Chris Godwin (TB WR) +0.14, Tim Patrick (DEN WR) +0.14, KhaDarel Hodge (DET WR) +0.14.">
+        <figcaption>Extra defenders' worth of focus drawn per route when he is not the target, compared with normal (minimum 50 such routes, 2021 weeks 1–8). Whiskers show the uncertainty.</figcaption>
+      </figure>
+      <ol class="top5" aria-label="Top 5 decoys">
+        <li>Pat Freiermuth (PIT TE)</li>
+        <li>Eric Ebron (PIT TE)</li>
+        <li>Kendall Hinton (DEN WR)</li>
+        <li>Dallas Goedert (PHI TE)</li>
+        <li>Tyreek Hill (KC WR)</li>
+      </ol>
+      <div class="callout">
+        <p><strong>Hidden hero: Eric Ebron (PIT TE).</strong> A top-2 decoy, but targeted on only 11% of his routes.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="takeaways-heading">
+      <h2 id="takeaways-heading">Coach takeaways</h2>
+      <ul class="takeaways">
+        <li>Scheme your best puller as the decoy to open the primary read.</li>
+        <li>Lean on it against zone, where pulled defenders open the most space.</li>
+        <li>A decoy only helps when he really moves a defender, so sell the route, and don't judge receivers by targets alone.</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="limits-heading">
+      <h2 id="limits-heading">Limits</h2>
+      <p>8 weeks of data; a defender being near a receiver isn't the same as covering him; rankings are only moderately stable week to week (r = 0.26); no detectable lift in completions or yards yet.</p>
+    </section>
+
+    <section aria-labelledby="summary-heading">
+      <h2 id="summary-heading">Everything on one page</h2>
+      <figure>
+        <a href="assets/summary.png">
+          <img src="assets/summary.png" width="2808" height="1378" loading="lazy"
+               alt="One-page summary: the definition of pull, the separation chart, the top 5 decoys, and callouts on zone versus man, scheme, and hidden hero Eric Ebron.">
+        </a>
+        <figcaption>Tap to open full size.</figcaption>
+      </figure>
+    </section>
+  </main>
+
+  <footer>
+    <p>Code, method and full results: <a href="https://github.com/rrm-07/nfl-big-data-bowl-regional-event-data">github.com/rrm-07/nfl-big-data-bowl-regional-event-data</a></p>
+    <p>Built on NFL Big Data Bowl 2023 tracking data (2021 season, weeks 1–8).</p>
+  </footer>
+</body>
+</html>
