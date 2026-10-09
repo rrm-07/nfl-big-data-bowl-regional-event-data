@@ -3,6 +3,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.transforms import offset_copy  # noqa: E402
 
 C_TARGET = "#E69F00"  # amber  - targeted receiver
 C_DECOY = "#0072B2"   # blue   - other eligible receivers (decoys)
@@ -18,17 +19,27 @@ plt.rcParams.update({
 })
 
 
-def binned_effect(series, path, title, xlabel, ylabel):
-    """Binned means with 95% CI. series = {label: (binned_df, colour)} from analysis.binned."""
-    fig, ax = plt.subplots(figsize=(8.5, 5.2))
-    for label, (b, col) in series.items():
-        ax.errorbar(b.x_mean, b["mean"], yerr=b.ci95, color=col, marker="o", ms=7, lw=2, capsize=4, label=label)
+def titles(ax, title, subtitle=None):
+    """Bold left-aligned title with a lighter subtitle underneath (same style on every chart)."""
+    if subtitle:
+        ax.set_title(subtitle, loc="left", fontsize=11, fontweight="normal", color="#444444", pad=8)
+        above = offset_copy(ax.transAxes, fig=ax.figure, y=27, units="points")
+        ax.text(0, 1, title, transform=above, fontsize=15, fontweight="bold", ha="left", va="bottom")
+    else:
+        ax.set_title(title, loc="left", fontsize=15, pad=10)
+
+
+def binned_effect(series, path, title, subtitle, xlabel, ylabel):
+    """Binned means with 95% CI. series = {label: (binned_df, colour, linestyle)} from analysis.binned."""
+    fig, ax = plt.subplots(figsize=(9, 5.4))
+    for label, (b, col, ls) in series.items():
+        ax.errorbar(b.x_mean, b["mean"], yerr=b.ci95, color=col, ls=ls, marker="o", ms=7, lw=2, capsize=4, label=label)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.set_title(title, loc="left")
+    titles(ax, title, subtitle)
     ax.grid(axis="y", color="#E5E5E5")
     ax.axvline(0, color="#BBBBBB", lw=1, ls=":")
-    ax.legend(frameon=False)
+    ax.legend(frameon=False, loc="upper left")
     fig.savefig(path)
     plt.close(fig)
 

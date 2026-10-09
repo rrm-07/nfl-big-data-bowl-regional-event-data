@@ -5,7 +5,7 @@ import time
 import pandas as pd
 
 from src import plots as P
-from src.analysis import binned, ols, play_table, split_half
+from src.analysis import binned, leaderboard, ols, play_table, split_half
 from src.clean import build
 from src.metric import gravity
 from src.model import features, oof_gbm, score
@@ -13,6 +13,7 @@ from src.model import features, oof_gbm, score
 pd.set_option("display.width", 250)
 OUT = "outputs"
 BASELINE = "v2"  # chosen over v1: higher out-of-fold R2 and (slightly) more stable player GOE
+MIN_ROUTES = 50  # minimum non-targeted routes for the leaderboard (20 let small-sample players into the top 10)
 
 
 def step(msg):
@@ -41,7 +42,8 @@ def main():
 
     # Robustness: the same metric measured 1.0 s before the throw (its own expected-gravity fit)
     g_pre, _ = gravity(f, moment="pre_throw")
-    d_pre = features(f, g_pre, plays_df).reset_index(drop=True)
+    pre_ok = plays_df.loc[plays_df.pre_ok, ["gameId", "playId"]]  # drops 6 throws made < 1 s after the snap
+    d_pre = features(f, g_pre, plays_df).merge(pre_ok, on=["gameId", "playId"]).reset_index(drop=True)
     d_pre["GOE"] = d_pre.G - oof_gbm(d_pre, BASELINE)
 
     step("Step 4: does decoy gravity create space?")
@@ -74,15 +76,38 @@ def main():
     s = reg.set_index(["decoy GOE measured", "outcome"])
     eff, eff_pre = s.loc[("at throw", "sep_throw")], s.loc[("throw - 1.0 s", "sep_throw")]
     P.binned_effect(
-        {"Decoy GOE at the throw": (b_throw, P.C_DECOY), "Decoy GOE 1.0 s before the throw": (b_pre, P.C_TARGET)},
+        {"Decoy GOE 1.0 s before the throw": (b_pre, P.C_DECOY, "-"),
+         "Decoy GOE at the throw": (b_throw, P.C_OTHER, "--")},
         f"{OUT}/decoy_goe_vs_separation.png",
-        title=(f"More decoy gravity, more space for the target\n"
-               f"+{eff.coef:.2f} yd separation per extra defender pulled ({eff_pre.coef:+.2f} yd if measured 1 s earlier)"),
+        title="Decoys that hold defenders open space for the target",
+        subtitle=(f"+{eff_pre.coef:.2f} yd target separation per extra defender pulled 1 s before the throw "
+                  f"(+{eff.coef:.2f} yd measured at the throw)"),
         xlabel="Total decoy GOE on the play (defenders' worth of attention above expected)",
         ylabel="Target separation at the throw (yd)",
     )
-    print(f"\nsaved {OUT}/decoy_goe_vs_separation.png | total {time.time() - t0:.0f}s")
-    return plays_df, f, d, p, reg
+    print(f"\nsaved {OUT}/decoy_goe_vs_separation.png")
+
+    step("Step 5: player leaderboard (non-targeted routes)")
+    lb = leaderboard(d_pre, d, plays_df, min_n=MIN_ROUTES)
+    lb.to_csv(f"{OUT}/leaderboard.csv", index=False)
+    print(f"{len(lb)} players with >= {MIN_ROUTES} non-targeted routes | routes per player: "
+          f"median {lb.decoy_routes.median():.0f}, min {lb.decoy_routes.min()}, max {lb.decoy_routes.max()}")
+    cols = ["player", "team", "pos", "decoy_routes", "goe_pre", "ci95", "goe_throw"]
+    print("\nTOP 10 (ranked by decoy GOE 1 s before the throw)")
+    print(lb[cols].head(10).round(3).to_string(index=False))
+    print("\nBOTTOM 5")
+    print(lb[cols].tail(5).round(3).to_string(index=False))
+
+    stab = []
+    for name, df in [("GOE 1 s before throw (ranking)", d_pre), ("GOE at throw", d)]:
+        for split in ["weeks", "odd_even"]:
+            r = split_half(df, split=split)
+            stab.append({"metric": name, "split": "wk 1-4 vs 5-8" if split == "weeks" else "odd vs even wk",
+                         **r, "full-sample reliability (Spearman-Brown)": 2 * r["r"] / (1 + r["r"])})
+    print("\nStability: player mean non-targeted GOE, >= 10 routes in each half")
+    print(pd.DataFrame(stab).round(3).to_string(index=False))
+    print(f"\ntotal {time.time() - t0:.0f}s")
+    return plays_df, f, d, d_pre, p, reg, lb
 
 
 if __name__ == "__main__":
