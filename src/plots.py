@@ -18,6 +18,21 @@ plt.rcParams.update({
 })
 
 
+def binned_effect(series, path, title, xlabel, ylabel):
+    """Binned means with 95% CI. series = {label: (binned_df, colour)} from analysis.binned."""
+    fig, ax = plt.subplots(figsize=(8.5, 5.2))
+    for label, (b, col) in series.items():
+        ax.errorbar(b.x_mean, b["mean"], yerr=b.ci95, color=col, marker="o", ms=7, lw=2, capsize=4, label=label)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title, loc="left")
+    ax.grid(axis="y", color="#E5E5E5")
+    ax.axvline(0, color="#BBBBBB", lw=1, ls=":")
+    ax.legend(frameon=False)
+    fig.savefig(path)
+    plt.close(fig)
+
+
 def draw_field(ax, x0, x1, los=None):
     """Field background between x0 and x1 (yards), yard lines every 5, numbers every 10."""
     ax.add_patch(plt.Rectangle((x0, 0), x1 - x0, 53.3, color=C_FIELD, zorder=0))

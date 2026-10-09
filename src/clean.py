@@ -2,8 +2,9 @@
 
 Outputs two tables:
   plays_df  - one row per usable pass play (target nflId, key frame ids, week)
-  frames_df - one row per player per key moment (snap / throw / arrival),
-              with positions standardised so offense always moves left -> right.
+  frames_df - one row per player per key moment (snap / pre_throw = throw - 1 s / throw /
+              post_throw = throw + 0.5 s), with offense always moving left -> right.
+Tracking stops <= 0.5 s after the throw, so there is no true pass-arrival frame.
 """
 import glob
 import os
@@ -83,14 +84,19 @@ def key_frames(t):
     kf = pd.DataFrame({
         "snap": first(["ball_snap"]).combine_first(first(["autoevent_ballsnap"])),
         "throw": first(["pass_forward"]).combine_first(first(["autoevent_passforward"])),
-        "arrival": first(["pass_arrived"]),
     })
     last = t.groupby(["gameId", "playId"]).frameId.max()
     kf = kf.reindex(last.index)
-    kf["arrival_is_real"] = kf.arrival.notna()
-    kf["arrival"] = kf.arrival.fillna(last)  # tracking ends ~0.5 s after the throw
     kf["snap"] = kf.snap.fillna(1)
-    return kf.dropna(subset=["throw"]).astype({"snap": int, "throw": int, "arrival": int}).reset_index()
+    kf = kf.dropna(subset=["throw"])
+    # Tracking stops <= 0.5 s after the throw, so there is no true arrival frame.
+    kf["post_throw"] = np.minimum(kf.throw + 5, last.reindex(kf.index))  # throw + 0.5 s
+    kf["pre_throw"] = np.maximum(kf.throw - 10, kf.snap)                  # throw - 1.0 s
+    kf["pre_ok"] = kf.throw - 10 > kf.snap                                # False on very quick throws
+    tagged = ev[ev.event.isin(["man_in_motion", "shift"])].groupby(["gameId", "playId"]).size()
+    kf["motion_tag"] = kf.index.isin(tagged.index)
+    ints = {c: int for c in ["snap", "throw", "post_throw", "pre_throw"]}
+    return kf.astype(ints).reset_index()
 
 
 def build():
@@ -103,17 +109,24 @@ def build():
     # --- play table: thrown passes with a recoverable target and a throw frame
     tg = parse_targets(plays, pff, players)
     kf = key_frames(t)
+    thrown = plays[plays.passResult.isin(["C", "I", "IN"])]
     plays_df = (
-        plays[plays.passResult.isin(["C", "I", "IN"])]
-        [["gameId", "playId", "possessionTeam", "defensiveTeam", "passResult", "playResult",
-          "absoluteYardlineNumber", "pff_passCoverageType", "playDescription"]]
+        thrown[["gameId", "playId", "possessionTeam", "defensiveTeam", "passResult", "playResult",
+                "prePenaltyPlayResult", "down", "yardsToGo", "quarter", "preSnapHomeScore", "preSnapVisitorScore",
+                "offenseFormation", "defendersInBox", "pff_passCoverage", "pff_passCoverageType",
+                "pff_playAction", "playDescription"]]
         .merge(tg, on=["gameId", "playId"])
         .merge(kf, on=["gameId", "playId"])
-        .merge(games[["gameId", "week"]], on="gameId")
+        .merge(games[["gameId", "week", "homeTeamAbbr"]], on="gameId")
     )
+    home = plays_df.possessionTeam == plays_df.homeTeamAbbr
+    diff = plays_df.preSnapHomeScore - plays_df.preSnapVisitorScore
+    plays_df["score_diff"] = np.where(home, diff, -diff)  # offense minus defense
+    plays_df["snap_to_throw"] = (plays_df.throw - plays_df.snap) / 10
+    info = {"n_thrown": len(thrown), "target_match_rate": len(tg.merge(thrown[["gameId", "playId"]])) / len(thrown)}
 
-    # --- tracking rows at the three key moments only (keeps everything small)
-    moments = plays_df.melt(id_vars=["gameId", "playId"], value_vars=["snap", "throw", "arrival"],
+    # --- tracking rows at the key moments only (keeps everything small)
+    moments = plays_df.melt(id_vars=["gameId", "playId"], value_vars=["snap", "pre_throw", "throw", "post_throw"],
                             var_name="moment", value_name="frameId")
     f = standardise(t).merge(moments, on=["gameId", "playId", "frameId"])
     f = (
@@ -134,7 +147,15 @@ def build():
     plays_df = plays_df.merge(tgt_ok, on=["gameId", "playId"])
     f = f.merge(tgt_ok, on=["gameId", "playId"])
 
+    # Field position and motion from the (standardised) snap frame
+    snap = f[f.moment == "snap"]
+    los = snap[snap.side == "ball"].set_index(["gameId", "playId"]).x.rename("los_x")
+    moving = snap[snap.is_receiver & (snap.s >= 2.0)].groupby(["gameId", "playId"]).size()  # in motion at the snap
+    plays_df = plays_df.join(los, on=["gameId", "playId"])
+    plays_df["yards_to_endzone"] = 110 - plays_df.los_x
+    plays_df["motion"] = plays_df.motion_tag | plays_df.set_index(["gameId", "playId"]).index.isin(moving.index)
+
     keep = ["gameId", "playId", "moment", "frameId", "nflId", "displayName", "officialPosition", "pos_group",
             "side", "pff_role", "pff_positionLinedUp", "is_target", "is_receiver", "is_defender",
             "x", "y", "s", "a", "o", "dir"]
-    return plays_df, f[keep]
+    return plays_df, f[keep], info
