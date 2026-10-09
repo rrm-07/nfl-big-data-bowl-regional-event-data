@@ -38,7 +38,7 @@ def gravity(frames, tau=TAU, max_dist=MAX_DIST, moment="throw"):
     att = attention(pairs_at(frames, moment), tau, max_dist)
     g = att.groupby(KEY + ["nflId_r"]).w.sum().rename("G").reset_index().rename(columns={"nflId_r": "nflId"})
     fr = frames[(frames.moment == moment) & frames.is_receiver]
-    out = fr[KEY + ["nflId", "displayName", "pos_group", "is_target"]].merge(g, on=KEY + ["nflId"], how="left")
+    out = fr[KEY + ["nflId", "displayName", "officialPosition", "pos_group", "is_target"]].merge(g, on=KEY + ["nflId"], how="left")
     out["G"] = out.G.fillna(0.0)
     return out, att
 

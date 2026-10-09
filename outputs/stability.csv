@@ -1,0 +1,13 @@
+level,metric,split,r,n
+player,GOE 1 s before throw,weeks 1-4 vs 5-8,0.38381599913268044,245
+player,GOE 1 s before throw,odd vs even weeks,0.27897121627210836,281
+player,GOE at throw,weeks 1-4 vs 5-8,0.27309196507597133,245
+player,GOE at throw,odd vs even weeks,0.23390369310497724,281
+player,Pull,weeks 1-4 vs 5-8,0.26357298150782804,245
+player,Pull,odd vs even weeks,0.2554104448412141,281
+team,GOE 1 s before throw,weeks 1-4 vs 5-8,0.402405662613621,32
+team,GOE 1 s before throw,odd vs even weeks,0.5597629715811404,32
+team,GOE at throw,weeks 1-4 vs 5-8,0.5691852929495483,32
+team,GOE at throw,odd vs even weeks,0.3616252978018221,32
+team,Pull,weeks 1-4 vs 5-8,0.3657568723457508,32
+team,Pull,odd vs even weeks,-0.013262276722745358,32
